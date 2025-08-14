@@ -1,17 +1,24 @@
 const fetch = require('node-fetch');
 
 module.exports = async function (context, req) {
-    const { selectedTeams, avgRating, selectedItems } = req.body;
-    const openAIKey = process.env.OPENAI_API_KEY;
+    context.log('JavaScript HTTP trigger function processed a request.');
 
-    if (!openAIKey) {
-        context.res = {
-            status: 500,
-            body: "OpenAI API key is not set."
-        };
-        return;
-    }
-    
+    const { selectedTeams, avgRating, selectedItems } = req.body;
+
+    // Log the incoming data to see what we're receiving
+    context.log('Received selectedTeams:', selectedTeams);
+    context.log('Received avgRating:', avgRating);
+    context.log('Received selectedItems:', selectedItems);
+
+    const teamNames = selectedTeams || [];
+    const teamSet = new Set(teamNames);
+
+    // Log the generated teamSet
+    context.log('Generated teamSet:', teamSet);
+
+    let roast = "";
+    let isSpecialCase = false;
+
     // Helper to check for Louisville in any college category
     function hasLouisvilleCollege(items) {
         return items.some(sel =>
@@ -38,18 +45,28 @@ module.exports = async function (context, req) {
 
     let systemPrompt = "";
     if (isJosh) {
+        context.log("Josh's special case triggered.");
+        isSpecialCase = true;
         systemPrompt += `If the selected teams are Oklahoma City Thunder, Pittsburgh Steelers, FC Cincinnati, and Manchester City, insult Josh Johnson directly in the roast. Make it personal, clever, and brutal.\n`;
     }
     if (isNick) {
+        context.log("Nick's special case triggered.");
+        isSpecialCase = true;
         systemPrompt += `If the selected teams are Pittsburgh Steelers, Chicago Cubs, Chicago Blackhawks, Indiana Pacers, and Arsenal, address Nick Leming by name and roast him directly. Make the roast unmistakably personal, clever, and brutal—focus on Nick Leming, not just the teams.\n`;
     }
     if (isDalton) {
+        context.log("Dalton's special case triggered.");
+        isSpecialCase = true;
         systemPrompt += `If the selected teams are Los Angeles Chargers, Chicago Bulls, Cincinnati Reds, Everton, and Louisville (in any college category), address Dalton Pirtle by name and roast him directly. Make the roast unmistakably personal, clever, and brutal—focus on Dalton Pirtle, not just the teams.\n`;
     }
     if (isBraden) {
+        context.log("Braden's special case triggered.");
+        isSpecialCase = true;
         systemPrompt += `If the selected teams are Cincinnati Bengals, Cincinnati Reds, FC Cincinnati, and Louisville (in any college category), address Braden Mulcahy by name and roast him directly. Make the roast unmistakably personal, clever, and brutal—focus on Braden Mulcahy, not just the teams.\n`;
     }
     if (isJakeKehoe) {
+        context.log("Jake's special case triggered.");
+        isSpecialCase = true;
         systemPrompt += `If the only team selected is Louisville in college football (CFB), address Jake Kehoe by name and roast him directly. Make the roast unmistakably personal, clever, and brutal—focus on Jake Kehoe, not just the team.\n`;
     }
 
@@ -66,17 +83,58 @@ module.exports = async function (context, req) {
         max_tokens: 100
     };
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${openAIKey}`
-        },
-        body: JSON.stringify(body)
-    });
+    if (isSpecialCase) {
+        context.res = {
+            headers: { 'Content-Type': 'application/json' },
+            body: { roast }
+        };
+        return;
+    }
 
-    const data = await response.json();
-    const roast = data.choices && data.choices[0] && data.choices[0].message.content ? data.choices[0].message.content : "No response.";
+    // If not a special case, proceed with OpenAI call
+    context.log("No special case triggered, proceeding with OpenAI call.");
+    const openAIKey = process.env.OPENAI_API_KEY;
+    if (!openAIKey) {
+        context.log.error("OpenAI API key is not set.");
+        context.res = {
+            status: 500,
+            body: "OpenAI API key is not set."
+        };
+        return;
+    }
+
+    try {
+        const openAIResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${openAIKey}`
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!openAIResponse.ok) {
+            const errorBody = await openAIResponse.text();
+            context.log.error("OpenAI API error:", openAIResponse.status, errorBody);
+            context.res = {
+                status: 500,
+                body: "Error from OpenAI API."
+            };
+            return;
+        }
+
+        const openAIData = await openAIResponse.json();
+        context.log("Received response from OpenAI.");
+        roast = openAIData.choices[0].message.content;
+
+    } catch (error) {
+        context.log.error("Error calling OpenAI:", error);
+        context.res = {
+            status: 500,
+            body: "Failed to get response from OpenAI."
+        };
+        return;
+    }
 
     context.res = {
         headers: { 'Content-Type': 'application/json' },
